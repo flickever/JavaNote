@@ -26,7 +26,7 @@
 
 谓词下推的基本思想：将过滤表达式尽可能移动至靠近数据源的位置，以使真正执行时能直接跳过无关的数据。
 
-在hive官网上给出了`outer join`【`left outer join、right out join、full outer join`】的谓下推规则：
+在hive官网上给出了`outer join`【`left outer join、right out join、full outer join`】的谓词下推规则：
 
 1. `Join`(只包括`left join ,right join,full join`)中的谓词如果是保留表的，则不会下推 
 2. `Join`(只包括`left join ,right join,full join`)之后的谓词如果是`Null Supplying tables`的，则不会下推
@@ -130,7 +130,7 @@ explain select t1.*,t2.* from test1 t1 full join test2 t2 on t1.id=t2.id and t1.
 
 `full join` 的左右表很矛盾，即是保留表，也是 `Null Supplying tables`。 但是有一条不变，就是左右表的数据都一定是要保留表下来的，因此也不难理解，这里为什么不能进行谓词下推，只要下推了，就不能保证两个表的数据都保留。。。
 
-所以，数据过滤是在join'操作后进行的
+所以，数据过滤是在join操作后进行的
 
 这也算是符合了【 `Join`(只包括 `left join ,right join,full join`)中的谓词如果是保留表的，则不会下推】
 

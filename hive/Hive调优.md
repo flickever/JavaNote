@@ -9,8 +9,8 @@ Hive 在读数据的时候，可以只读取查询中所需要用到的列，而
 分区裁剪与列裁剪的设置是默认开启的，只要在where条件里面加上分区过滤即可。
 
 ```shell
-set hive.optimize.cp = true；      # 列裁剪
-set hive.optimize.pruner = true；  # 分区裁剪 
+set hive.optimize.cp = true;      # 列裁剪
+set hive.optimize.pruner = true;  # 分区裁剪 
 ```
 
 
@@ -76,6 +76,7 @@ set hive.vectorized.execution.reduce.enabled = true;  # 默认true
 当然，有时候矢量计算也会触发一些奇怪的错误，类似下面的报错,这时候需要关掉矢量计算
 
 ```
+
 ```
 
 Hive关于矢量计算的文档：[Vectorized Query Execution]([Vectorized Query Execution - Apache Hive - Apache Software Foundation](https://cwiki.apache.org/confluence/display/Hive/Vectorized+Query+Execution#space-menu-link-content))
@@ -181,6 +182,10 @@ set hive.stats.fetch.partition.stats=true;
 
 MapJoin 是将 Join 双方比较小的表直接分发到各个 Map 进程的内存中，在 Map 进程中进行 Join 操作，这样就不用进行 Reduce 步骤，从而提高了速度
 
+首先会产生一个Mapreduce任务，将小表抓取到内存中，并以Hashtable形式输出，在下一阶段，当 MapReduce 任务启动时，会将这个哈希表文件上传到 Hadoop 分布式缓存中，该缓存会将这些文件发送到每个 Mapper 的本地磁盘上。因此，所有 Mapper 都可以将此持久化的哈希表文件加载回内存，并像之前一样进行 Join。
+
+mapjoin 执行过程中会有一个普通的 join 来兜底，如果 mapjoin 失效走普通 join 保证任务不失败。
+
 如果不指定 MapJoin或者不符合 MapJoin 的条件，那么 Hive 解析器会将 Join 操作转换成 Common Join，即：在Reduce 阶段完成 Join。容易发生数据倾斜
 
 ```shell
@@ -234,6 +239,12 @@ set hive.groupby.mapaggr.checkinterval = 100000;
 # 有数据倾斜的时候进行负载均衡（默认是 false）
 set hive.groupby.skewindata = true;
 ```
+
+当选项`hive.groupby.skewindata`设定为true，生成的查询计划会有两个MRJob。
+
+第一个MRJob 中，Map的输出结果集合会随机分布到Reduce中，每个Reduce做部分聚合操作，并输出结果，这样处理的结果是相同的GroupBy Key有可能被分发到不同的Reduce中，从而达到负载均衡的目的；
+
+第二个MRJob再根据预处理的数据结果按照GroupBy Key分布到Reduce中（这个过程可以保证相同的GroupBy Key被分布到同一个Reduce中），最后完成最终的聚合操作。
 
 增加reducer的数量：
 
@@ -344,13 +355,13 @@ set hive.input.format = org.apache.hadoop.hive.ql.io.CombineHiveInputFormat;
   set hive.merge.smallfiles.avgsize = 16777216;
   ```
 
-Map端聚合
+#### Map端聚合
 
 ```shell
 set hive.map.aggr=true;相当于 map 端执行 combiner
 ```
 
-推测执行
+#### 推测执行
 
 ```shell
 set mapred.map.tasks.speculative.execution = true #默认是 true
@@ -429,4 +440,106 @@ set hive.exec.parallel.thread.number=16;
 **JVM** **重用**
 
 小文件过多时候使用，文件比较大时候一般不用，因为不能前一个JVM实例在处理，后一个任务还在死等.
+
+
+
+
+
+## Hive三大场景优化
+
+常见的ETL问题：
+
+| HiveSQL执行日志                             | 可能原因                                         |
+| ------------------------------------------- | ------------------------------------------------ |
+| 1. ETL长时间任务没有开始                    | 查询文件数过大，需要限制查询数据分区             |
+| 2. 长时间没有输出Mapper/Reducer数量         | 一般yarn负载较高                                 |
+| 3. 长时间mapper=0%，reducer=0%              | task数量较多，创建task耗时较长，等待task资源分配 |
+| 4. 长时间mapper=99%，reducer=10%            | map处理数据不均，存在数据倾斜                    |
+| 5. 长时间mapper=100%，reducer=99%           | 数据存在倾斜，导致慢查询                         |
+| 6. mapper进度回退，reducer进度不变          | map端链接不上或结果文件有问题，设计容错机制重算  |
+| 7. 任务执行失败，尝试多次后成功             | 内存溢出或机器故障导致任务失败                   |
+| 8. 某个task处理数据量不大，但是执行耗时很长 | 小文件过多带来文件拉取耗时                       |
+
+
+
+### 数据量大
+
+使用分区裁剪、列裁剪、谓词下推
+
+开启他们的配置参数
+
+```shell
+set hive.optimize.cp = true;       # 列裁剪
+set hive.optimize.pruner = true;   # 分区裁剪 
+set hive.optimize.ppd = true;      # 谓词下推，默认是 true
+```
+
+### 小文件多
+
+Map端合并小文件
+
+```
+mapred.max.split.size
+mapred.min.split.size.per.node
+mapred.min.split.size.per.rack
+```
+
+Reduce端合并小文件
+
+```
+hive.exec.reducers.bytes.per.reducer
+```
+
+写入后合并小文件
+
+```
+hive.merge.mapredfiles
+hive.merge.smallfiles.avgsize
+hive.merge.size.per.task
+```
+
+多分区小文件合并
+
+```
+distribute by key1,key2
+```
+
+
+
+### 数据倾斜
+
+1. 热点数据与非热点数据分开计算
+2. mapjoin实现小表链接大表
+3. 大表热点数据在key上拼接0～n的前缀/后缀，同时小表冗余扩大n倍数据，保证join到对应键值，然后去掉前缀/后缀。
+4. a left join b 可以转换为：b left join a 加 union，基于维度对指标进行聚合函数封装。
+5. Null值不参与关联，给Null值分配随机值
+6. 两阶段聚合（局部 + 全局聚合）
+
+count distinct去重优化配置
+
+```
+hive.optimize.countdistinct 默认是true,3.0新配置
+去重并计数的作业会分成两个作业来处理这类sql,已达到减缓sql数据倾斜
+```
+
+
+
+### 万用配置
+
+```shell
+万能参数配置，最优的使用机器资源：
+set hive.exec.dynamic.partition=true;
+set hive.exec.dynamic.partition.mode=nonstrict;
+set hive.exec.parallel=true;
+set mapred.max.split.size=64000000;
+set mapred.min.split.size.per.node=64000000;
+set mapred.min.split.size.per.rack=64000000;
+set hive.exec.reducers.bytes.per.reducer=256000000;
+set hive.exec.reducers.max=2000;
+set hive.merge.mapredfiles=true;
+set hive.merge.smallfiles.avgsize = 128000000;
+set hive.merge.size.per.task=128000000;
+```
+
+
 
