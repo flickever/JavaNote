@@ -198,12 +198,14 @@
 
    **Connect** ：连接两个保持他们类型的数 据流，两个数据流被 Connect 之后，只是被放在了一个同一个流中，内部依然保持各自的数据和形式不发生任何变化，两个流相互独立
 
+   connect经常被应用在对一个数据流使用另外一个流进行控制处理的场景上。
+
    **CoMap**：作用于 ConnectedStreams 上，功能与 map 和 flatMap 一样，对 ConnectedStreams 中的每一个 Stream 分别进行 map 和 flatMap处理
 
    其中流的类型就算不一样，一样可以conncet起来，得到的流内部还是多个独立的流
 
    多个不同类型的connect流，coMap返回的结果需要是同一类型的流
-
+   
    ```scala
    val warning = high.map( sensorData => (sensorData.id, sensorData.temperature) ) 
    
