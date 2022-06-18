@@ -77,6 +77,9 @@ PRIMARY KEY (`source_table`,`operate_type`)
 - 获取广播流配置数据
 - 过滤字段，分流写到Kafka
 
+**广播配置流比主流晚怎么办？**
+会导致主流数据写不到Phoenix中
+解决办法：在主流的open方法中先读加载一下配置信息，写到Map中，Map读不到的话，就表示没有相应的配置数据
 
 
 ## 3. DWD-DIM
