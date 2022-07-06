@@ -150,5 +150,8 @@ PRIMARY KEY (`source_table`,`operate_type`)
 2. 响应请求
 3. 处理完结果写回流中
 
+可以选择按顺序（orderedWait）返回数据，或者不按顺序（unorderedWait）返回数据
 
+**线程池单例对象**
 
+当请求队列满了，线程池才会开始创建新的线程
