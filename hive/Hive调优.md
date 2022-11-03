@@ -71,12 +71,78 @@ set hive.vectorized.execution.enabled = true;         # 默认false
 set hive.vectorized.execution.reduce.enabled = true;  # 默认true
 ```
 
-
+原理:
+  Hive 计算的时候默认是一次处理一行。在处理下一行之前，这一行数据需要先经过所有计算。这种处理模式的 CPU 使用效率非常低。而且Hive 目前严重依赖比较慢的反序列化方式，数据会通过一层对象检查器，用来标识列类型、反序列化数据并在内部循环中确定适当的（计算）表达式。这些虚拟方法调用会进一步减慢了处理速度。(https://issues.apache.org/jira/browse/HIVE-4160)
+  所以 Hive 添加了矢量化查询、执行的支持，这样在 Hive 中就能一次处理大约一千行的批次（默认），而不是一行。批处理中的每一列都表示为基本数据类型的向量。执行的内部循环的时候能非常快速地扫描这些向量，避免了方法调用、反序列化、不必要的 if-then-else 等，这大大减少了CPU的使用时间。
+  简单的运算（如算术和比较）是通过在紧循环中快速迭代向量来完成的，循环中没有或很少有函数调用或条件分支。这些循环以一种精简的方式编译，通过有效地使用处理器流水线和缓存，使用相对较少的指令，平均在更少的时钟周期内完成每条指令。
 
 当然，有时候矢量计算也会触发一些奇怪的错误，类似下面的报错,这时候需要关掉矢量计算
 
 ```
-
+2021-07-31 14:23:11,467 WARN [main] org.apache.hadoop.mapred.YarnChild: Exception running child : java.lang.RuntimeException: Error in configuring object
+	at org.apache.hadoop.util.ReflectionUtils.setJobConf(ReflectionUtils.java:113)
+	at org.apache.hadoop.util.ReflectionUtils.setConf(ReflectionUtils.java:79)
+	at org.apache.hadoop.util.ReflectionUtils.newInstance(ReflectionUtils.java:137)
+	at org.apache.hadoop.mapred.MapTask.runOldMapper(MapTask.java:462)
+	at org.apache.hadoop.mapred.MapTask.run(MapTask.java:349)
+	at org.apache.hadoop.mapred.YarnChild$2.run(YarnChild.java:174)
+	at java.security.AccessController.doPrivileged(Native Method)
+	at javax.security.auth.Subject.doAs(Subject.java:422)
+	at org.apache.hadoop.security.UserGroupInformation.doAs(UserGroupInformation.java:1731)
+	at org.apache.hadoop.mapred.YarnChild.main(YarnChild.java:168)
+Caused by: java.lang.reflect.InvocationTargetException
+	at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+	at sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.lang.reflect.Method.invoke(Method.java:498)
+	at org.apache.hadoop.util.ReflectionUtils.setJobConf(ReflectionUtils.java:110)
+	... 9 more
+Caused by: java.lang.RuntimeException: Error in configuring object
+	at org.apache.hadoop.util.ReflectionUtils.setJobConf(ReflectionUtils.java:113)
+	at org.apache.hadoop.util.ReflectionUtils.setConf(ReflectionUtils.java:79)
+	at org.apache.hadoop.util.ReflectionUtils.newInstance(ReflectionUtils.java:137)
+	at org.apache.hadoop.mapred.MapRunner.configure(MapRunner.java:38)
+	... 14 more
+Caused by: java.lang.reflect.InvocationTargetException
+	at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+	at sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.lang.reflect.Method.invoke(Method.java:498)
+	at org.apache.hadoop.util.ReflectionUtils.setJobConf(ReflectionUtils.java:110)
+	... 17 more
+Caused by: java.lang.OutOfMemoryError: GC overhead limit exceeded
+	at org.apache.hadoop.io.Text.setCapacity(Text.java:268)
+	at org.apache.hadoop.io.Text.set(Text.java:224)
+	at org.apache.hadoop.io.Text.set(Text.java:214)
+	at org.apache.hadoop.io.Text.<init>(Text.java:93)
+	at org.apache.hadoop.hive.serde2.objectinspector.primitive.WritableStringObjectInspector.copyObject(WritableStringObjectInspector.java:36)
+	at org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorUtils.copyToStandardObject(ObjectInspectorUtils.java:433)
+	at org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorUtils.copyToStandardObject(ObjectInspectorUtils.java:468)
+	at org.apache.hadoop.hive.ql.exec.persistence.MapJoinKeyObject.read(MapJoinKeyObject.java:110)
+	at org.apache.hadoop.hive.ql.exec.persistence.MapJoinKeyObject.read(MapJoinKeyObject.java:105)
+	at org.apache.hadoop.hive.ql.exec.persistence.MapJoinKeyObject.read(MapJoinKeyObject.java:101)
+	at org.apache.hadoop.hive.ql.exec.persistence.MapJoinTableContainerSerDe.load(MapJoinTableContainerSerDe.java:87)
+	at org.apache.hadoop.hive.ql.exec.mr.HashTableLoader.load(HashTableLoader.java:100)
+	at org.apache.hadoop.hive.ql.exec.MapJoinOperator.loadHashTableInternal(MapJoinOperator.java:335)
+	at org.apache.hadoop.hive.ql.exec.MapJoinOperator.loadHashTable(MapJoinOperator.java:404)
+	at org.apache.hadoop.hive.ql.exec.MapJoinOperator.lambda$initializeOp$0(MapJoinOperator.java:206)
+	at org.apache.hadoop.hive.ql.exec.MapJoinOperator$$Lambda$38/206310209.call(Unknown Source)
+	at org.apache.hadoop.hive.ql.exec.mr.ObjectCache.retrieve(ObjectCache.java:59)
+	at org.apache.hadoop.hive.ql.exec.mr.ObjectCache.retrieveAsync(ObjectCache.java:67)
+	at org.apache.hadoop.hive.ql.exec.ObjectCacheWrapper.retrieveAsync(ObjectCacheWrapper.java:51)
+	at org.apache.hadoop.hive.ql.exec.MapJoinOperator.initializeOp(MapJoinOperator.java:205)
+	at org.apache.hadoop.hive.ql.exec.vector.VectorMapJoinBaseOperator.initializeOp(VectorMapJoinBaseOperator.java:221)
+	at org.apache.hadoop.hive.ql.exec.vector.VectorMapJoinOperator.initializeOp(VectorMapJoinOperator.java:129)
+	at org.apache.hadoop.hive.ql.exec.Operator.initialize(Operator.java:376)
+	at org.apache.hadoop.hive.ql.exec.Operator.initialize(Operator.java:573)
+	at org.apache.hadoop.hive.ql.exec.Operator.initializeChildren(Operator.java:525)
+	at org.apache.hadoop.hive.ql.exec.Operator.initialize(Operator.java:386)
+	at org.apache.hadoop.hive.ql.exec.mr.ExecMapper.configure(ExecMapper.java:128)
+	at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+	at sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.lang.reflect.Method.invoke(Method.java:498)
+	at org.apache.hadoop.util.ReflectionUtils.setJobConf(ReflectionUtils.java:110)
 ```
 
 Hive关于矢量计算的文档：[Vectorized Query Execution]([Vectorized Query Execution - Apache Hive - Apache Software Foundation](https://cwiki.apache.org/confluence/display/Hive/Vectorized+Query+Execution#space-menu-link-content))
