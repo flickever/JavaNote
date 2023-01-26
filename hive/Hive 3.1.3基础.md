@@ -753,6 +753,8 @@ row format delimited fields terminated by '\t';
 
 导入数据到分桶表中
 
+说明：Hive新版本load数据可以直接跑MapReduce，老版的Hive需要将数据传到一张表里，再通过查询的方式导入到分桶表里面。
+
 ```hive
 hive (default)> 
 load data local inpath '/opt/module/hive/datas/student.txt' 
@@ -803,7 +805,7 @@ ORC（Optimized Row Columnar）file format是Hive 0.11版里引入的一种**列
 
 **列存储的特点**：因为每个字段的数据聚集存储，在查询只需要少数几个字段的时候，能大大减少读取的数据量；每个字段的数据类型一定是相同的，列式存储可以针对性的设计更好的设计压缩算法。
 
-![image-20230123171254338](https://raw.githubusercontent.com/flickever/NotePictures/master/Note/HiveOrc%E6%96%87%E4%BB%B6%E7%BB%84%E6%88%90.png)
+![image-20230123171254338](https://raw.githubusercontent.com/flickever/NotePictures/master/Note/Hive/Orc%E6%96%87%E4%BB%B6.png)
 
 每个Orc文件由Header、Body和Tail三部分组成。
 
@@ -840,7 +842,7 @@ Body由1个或多个stripe组成，每个stripe一般为HDFS的块大小，每�
 
 Parquet文件是Hadoop生态中的一个通用的文件格式，它也是一个列式存储的文件格式
 
-![image-20230123172003829](https://raw.githubusercontent.com/flickever/NotePictures/master/Note/HiveParquet%E6%96%87%E4%BB%B6%E7%BB%84%E6%88%90.png)
+![image-20230123172003829](https://raw.githubusercontent.com/flickever/NotePictures/master/Note/Hive/Parquet%E6%96%87%E4%BB%B6.png)
 
 首尾中间由若干个Row Group和一个Footer（File Meta Data）组成。
 
